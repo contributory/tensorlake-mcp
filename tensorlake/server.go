@@ -35,26 +35,32 @@ import (
 )
 
 type server struct {
-	tl        *tensorlake.Client
-	sandboxID string
-	sandboxMu sync.Mutex
+	tl          *tensorlake.Client
+	apiKey      string
+	sandboxID   string
+	sandboxMu   sync.Mutex
+	bgMu        sync.Mutex
+	bgProcesses map[string]*bgProcess
+	bgCounter   int
 }
 
-func newServer() *server {
+func newServer(apiKey string) *server {
 	return &server{
+		apiKey: apiKey,
 		tl: tensorlake.NewClient(
 			tensorlake.WithBaseURL(tlAPIBaseURL),
-			tensorlake.WithAPIKey(tlAPIKey),
+			tensorlake.WithAPIKey(apiKey),
 			tensorlake.WithSandboxAPIBaseURL(tlSandboxAPIBaseURL),
 			tensorlake.WithSandboxProxyBaseURL(tlSandboxProxyBaseURL),
 		),
+		bgProcesses: make(map[string]*bgProcess),
 	}
 }
 
 // sessionFilePath returns a deterministic temp file path for persisting the sandbox ID.
 // The path is keyed by API key hash so different accounts don't collide.
-func sessionFilePath() string {
-	h := sha256.Sum256([]byte(tlAPIKey))
+func (s *server) sessionFilePath() string {
+	h := sha256.Sum256([]byte(s.apiKey))
 	return filepath.Join(os.TempDir(), fmt.Sprintf("tensorlake-mcp-session-%x", h[:8]))
 }
 
@@ -71,7 +77,7 @@ func (s *server) loadPersistedSandbox(ctx context.Context) (string, bool) {
 	}
 
 	// Try temp file.
-	data, err := os.ReadFile(sessionFilePath())
+	data, err := os.ReadFile(s.sessionFilePath())
 	if err != nil {
 		return "", false
 	}
@@ -83,7 +89,7 @@ func (s *server) loadPersistedSandbox(ctx context.Context) (string, bool) {
 	info, err := s.tl.GetSandbox(ctx, id)
 	if err != nil || info.Status != tensorlake.SandboxStatusRunning {
 		slog.Info("persisted sandbox no longer running, creating new one", "sandbox_id", id)
-		os.Remove(sessionFilePath())
+		os.Remove(s.sessionFilePath())
 		return "", false
 	}
 
@@ -92,8 +98,8 @@ func (s *server) loadPersistedSandbox(ctx context.Context) (string, bool) {
 }
 
 // persistSandboxID writes the sandbox ID to disk.
-func persistSandboxID(id string) {
-	if err := os.WriteFile(sessionFilePath(), []byte(id), 0o600); err != nil {
+func (s *server) persistSandboxID(id string) {
+	if err := os.WriteFile(s.sessionFilePath(), []byte(id), 0o600); err != nil {
 		slog.Warn("failed to persist sandbox ID", "error", err)
 	}
 }
@@ -143,7 +149,7 @@ func (s *server) ensureSandbox(ctx context.Context) (string, error) {
 
 	slog.Info("sandbox created", "sandbox_id", resp.SandboxId)
 	s.sandboxID = resp.SandboxId
-	persistSandboxID(s.sandboxID)
+	s.persistSandboxID(s.sandboxID)
 
 	// Create /data directory for the default workspace.
 	if err := s.tl.WriteSandboxFile(ctx, s.sandboxID, "/data/.keep", strings.NewReader("")); err != nil {
@@ -262,7 +268,7 @@ func (s *server) CleanupSession(ctx context.Context) {
 		} else {
 			slog.Info("sandbox deleted", "sandbox_id", s.sandboxID)
 		}
-		os.Remove(sessionFilePath())
+		os.Remove(s.sessionFilePath())
 		s.sandboxID = ""
 	}
 }

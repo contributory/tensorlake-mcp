@@ -7,38 +7,56 @@ Encore.go deployment wrapper for the SIXT/Tensorlake MCP server.
 - `POST /mcp` — MCP Streamable HTTP endpoint (stateless, JSON response mode)
 - `GET /status` — health check
 
-`/mcp` requires `Authorization: Bearer <token>`.
+## Authentication / Tensorlake API key
 
-## Encore secrets
+The Tensorlake API key is supplied by each MCP client request. The service does not require a server-side Tensorlake API key secret.
 
-The service declares two Encore secrets:
+Preferred:
 
-- `TensorlakeAPIKey` — Tensorlake API key
-- `MCPBearerToken` — bearer token required by MCP clients
+```http
+Authorization: Bearer <TENSORLAKE_API_KEY>
+```
 
-Set them for the target environment before deployment.
+Query parameter fallback:
+
+```text
+/mcp?tensorlake_api_key=<TENSORLAKE_API_KEY>
+```
+
+The shorter alias `api_key` is also accepted:
+
+```text
+/mcp?api_key=<TENSORLAKE_API_KEY>
+```
+
+If both a Bearer header and query parameter are present, the Bearer value wins.
+
+Bearer is recommended because query-string credentials may be visible to proxies, access logs, browser history, and observability systems before the application can redact them.
+
+## Tenant isolation
+
+Each distinct Tensorlake API key gets its own Tensorlake client, sandbox state, persisted sandbox ID, and background-process namespace. The in-memory tenant map is keyed by SHA-256 of the API key rather than the raw credential.
+
+The MCP transport itself remains stateless. The active Tensorlake sandbox is process-local plus a temporary persisted sandbox-ID file, so horizontally scaling the service still requires a shared session store if requests for one API key can land on different instances.
 
 ## Local validation
 
 ```bash
-go test ./...
 encore test ./...
 ```
 
-Both test suites validate the adapter and Encore application model. The MCP initialize handshake is covered by `tensorlake/encore_api_test.go`.
+The adapter tests cover missing credentials, Bearer credentials, both supported query parameters, and Bearer-over-query precedence.
 
 ## Deploy to Encore Cloud
 
-Link the repository to an Encore Cloud app, configure both secrets for the target environment, then deploy using Encore's Git integration (`git push encore`) or the Encore deploy command.
+The repository is linked to Encore app `tensorlake-mcp-http-kiwi`. Push the branch to Encore to deploy:
 
-After deployment the MCP URL is:
-
-```text
-https://<your-encore-domain>/mcp
+```bash
+git push encore HEAD:refs/heads/main
 ```
 
-Configure clients with the HTTP endpoint and an Authorization bearer header.
+Staging endpoint:
 
-## Design notes
-
-The upstream server originally uses stdio. This wrapper keeps the Tensorlake tools unchanged and replaces the process entrypoint with `mcp.NewStreamableHTTPHandler`. The MCP transport is stateless, but the upstream Tensorlake server keeps the active sandbox ID in process-local state. Run this adapter as a single service instance unless you add a shared sandbox-session store. Use separate deployments/tokens when hard workspace isolation is required.
+```text
+https://staging-tensorlake-mcp-http-kiwi.encr.app/mcp
+```

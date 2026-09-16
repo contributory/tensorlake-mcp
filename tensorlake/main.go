@@ -33,7 +33,6 @@ const (
 var (
 	logLevel              = os.Getenv("TENSORLAKE_MCP_LOG_LEVEL")
 	tlAPIBaseURL          = os.Getenv("TENSORLAKE_API_BASE_URL")
-	tlAPIKey              = os.Getenv("TENSORLAKE_API_KEY")
 	tlSandboxAPIBaseURL   = os.Getenv("TENSORLAKE_SANDBOX_API_BASE_URL")
 	tlSandboxProxyBaseURL = os.Getenv("TENSORLAKE_SANDBOX_PROXY_BASE_URL")
 	tlSandboxTimeoutSecs  int
@@ -69,7 +68,7 @@ func init() {
 	}
 }
 
-func newMCPServer() (*mcp.Server, *server) {
+func newMCPServer(apiKey string) (*mcp.Server, *server) {
 	impl := mcp.NewServer(&mcp.Implementation{
 		Name:    serverName,
 		Version: serverVersion,
@@ -87,7 +86,7 @@ func newMCPServer() (*mcp.Server, *server) {
 		HasTools: true,
 	})
 
-	s := newServer()
+	s := newServer(apiKey)
 
 	mcp.AddTool(impl, &mcp.Tool{
 		Name: "bash",

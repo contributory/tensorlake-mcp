@@ -18,7 +18,6 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"sync"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -44,12 +43,6 @@ type bgProcess struct {
 	result BashOutput
 	err    error
 }
-
-var (
-	bgMu        sync.Mutex
-	bgProcesses = map[string]*bgProcess{}
-	bgCounter   int
-)
 
 func (s *server) Bash(ctx context.Context, req *mcp.CallToolRequest, in *BashInput) (*mcp.CallToolResult, any, error) {
 	if in.Description != "" {
@@ -87,12 +80,12 @@ func (s *server) bashBackground(ctx context.Context, _ *mcp.CallToolRequest, in 
 		return newToolResultError(fmt.Errorf("failed to ensure sandbox: %w", err))
 	}
 
-	bgMu.Lock()
-	bgCounter++
-	id := fmt.Sprintf("bg-%d", bgCounter)
+	s.bgMu.Lock()
+	s.bgCounter++
+	id := fmt.Sprintf("bg-%d", s.bgCounter)
 	proc := &bgProcess{done: make(chan struct{})}
-	bgProcesses[id] = proc
-	bgMu.Unlock()
+	s.bgProcesses[id] = proc
+	s.bgMu.Unlock()
 
 	go func() {
 		defer close(proc.done)
@@ -119,9 +112,9 @@ type BashStatusInput struct {
 }
 
 func (s *server) BashStatus(ctx context.Context, req *mcp.CallToolRequest, in *BashStatusInput) (*mcp.CallToolResult, any, error) {
-	bgMu.Lock()
-	proc, ok := bgProcesses[in.ProcessID]
-	bgMu.Unlock()
+	s.bgMu.Lock()
+	proc, ok := s.bgProcesses[in.ProcessID]
+	s.bgMu.Unlock()
 
 	if !ok {
 		return newToolResultError(fmt.Errorf("unknown process_id: %s", in.ProcessID))
@@ -130,9 +123,9 @@ func (s *server) BashStatus(ctx context.Context, req *mcp.CallToolRequest, in *B
 	select {
 	case <-proc.done:
 		// Clean up.
-		bgMu.Lock()
-		delete(bgProcesses, in.ProcessID)
-		bgMu.Unlock()
+		s.bgMu.Lock()
+		delete(s.bgProcesses, in.ProcessID)
+		s.bgMu.Unlock()
 		return newToolResultJSON(&proc.result)
 	default:
 		return newToolResultJSON(map[string]string{

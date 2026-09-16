@@ -2,30 +2,72 @@ package tensorlake
 
 import (
 	"context"
-	"crypto/subtle"
-	"encoding/json"
+	"crypto/sha256"
 	"net/http"
+	"strings"
 	"sync"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-var secrets struct {
-	TensorlakeAPIKey string
-	MCPBearerToken   string
+type tenantAPIKeyContextKey struct{}
+
+type tenantMCPServer struct {
+	impl *mcp.Server
 }
 
 var (
 	handlerOnce sync.Once
 	mcpHandler  http.Handler
+
+	tenantMu      sync.Mutex
+	tenantServers = make(map[[32]byte]*tenantMCPServer)
 )
+
+func apiKeyFromRequest(req *http.Request) string {
+	if value, ok := req.Context().Value(tenantAPIKeyContextKey{}).(string); ok && value != "" {
+		return value
+	}
+
+	if auth := strings.TrimSpace(req.Header.Get("Authorization")); auth != "" {
+		parts := strings.Fields(auth)
+		if len(parts) == 2 && strings.EqualFold(parts[0], "Bearer") {
+			if key := strings.TrimSpace(parts[1]); key != "" {
+				return key
+			}
+		}
+	}
+
+	for _, name := range []string{"tensorlake_api_key", "api_key"} {
+		if key := strings.TrimSpace(req.URL.Query().Get(name)); key != "" {
+			return key
+		}
+	}
+
+	return ""
+}
+
+func serverForAPIKey(apiKey string) *mcp.Server {
+	hash := sha256.Sum256([]byte(apiKey))
+
+	tenantMu.Lock()
+	defer tenantMu.Unlock()
+
+	if existing := tenantServers[hash]; existing != nil {
+		return existing.impl
+	}
+
+	impl, _ := newMCPServer(apiKey)
+	tenantServers[hash] = &tenantMCPServer{impl: impl}
+	return impl
+}
 
 func handler() http.Handler {
 	handlerOnce.Do(func() {
-		tlAPIKey = secrets.TensorlakeAPIKey
-		impl, _ := newMCPServer()
 		mcpHandler = mcp.NewStreamableHTTPHandler(
-			func(*http.Request) *mcp.Server { return impl },
+			func(req *http.Request) *mcp.Server {
+				return serverForAPIKey(apiKeyFromRequest(req))
+			},
 			&mcp.StreamableHTTPOptions{
 				Stateless:    true,
 				JSONResponse: true,
@@ -35,26 +77,38 @@ func handler() http.Handler {
 	return mcpHandler
 }
 
-func authorized(req *http.Request) bool {
-	got := req.Header.Get("Authorization")
-	want := "Bearer " + secrets.MCPBearerToken
-	return subtle.ConstantTimeCompare([]byte(got), []byte(want)) == 1
-}
-
-// MCP exposes the Tensorlake MCP server over the MCP Streamable HTTP transport.
-// The MCP transport is intentionally stateless; keep this deployment single-instance because the upstream Tensorlake workspace cache is process-local.
+// serveMCP extracts the caller's Tensorlake API key from either:
+//   - Authorization: Bearer <tensorlake-api-key> (preferred)
+//   - ?tensorlake_api_key=<tensorlake-api-key>
+//   - ?api_key=<tensorlake-api-key>
 //
-// Internal implementation used by the Encore raw endpoint and unit tests.
+// The raw key is removed from the cloned request before handing it to the MCP
+// transport and is used only to select the caller-specific Tensorlake client.
 func serveMCP(w http.ResponseWriter, req *http.Request) {
-	if !authorized(req) {
+	apiKey := apiKeyFromRequest(req)
+	if apiKey == "" {
 		w.Header().Set("WWW-Authenticate", `Bearer realm="tensorlake-mcp"`)
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		http.Error(w, "missing Tensorlake API key", http.StatusUnauthorized)
 		return
 	}
 
-	handler().ServeHTTP(w, req)
+	ctx := context.WithValue(req.Context(), tenantAPIKeyContextKey{}, apiKey)
+	cleanReq := req.Clone(ctx)
+	cleanReq.Header = req.Header.Clone()
+	cleanReq.Header.Del("Authorization")
+
+	cleanURL := *req.URL
+	query := cleanURL.Query()
+	query.Del("tensorlake_api_key")
+	query.Del("api_key")
+	cleanURL.RawQuery = query.Encode()
+	cleanReq.URL = &cleanURL
+
+	handler().ServeHTTP(w, cleanReq)
 }
 
+// MCP exposes the Tensorlake MCP server over MCP Streamable HTTP.
+//
 //encore:api public raw path=/mcp
 func MCP(w http.ResponseWriter, req *http.Request) {
 	serveMCP(w, req)
@@ -71,11 +125,4 @@ type HealthResponse struct {
 	Status    string `json:"status"`
 	Transport string `json:"transport"`
 	Stateless bool   `json:"stateless"`
-}
-
-// Unauthorized is kept small and JSON-safe for clients that probe the endpoint.
-func writeJSONError(w http.ResponseWriter, status int, message string) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(map[string]string{"error": message})
 }
