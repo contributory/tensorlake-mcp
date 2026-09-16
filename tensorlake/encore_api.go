@@ -62,7 +62,7 @@ func MCP(w http.ResponseWriter, req *http.Request) {
 
 // Health reports whether the service process is up. It does not call Tensorlake.
 //
-//encore:api public method=GET path=/healthz
+//encore:api public method=GET path=/status
 func Health(ctx context.Context) (*HealthResponse, error) {
 	return &HealthResponse{Status: "ok", Transport: "streamable-http", Stateless: true}, nil
 }

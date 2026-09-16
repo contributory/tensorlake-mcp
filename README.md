@@ -5,7 +5,7 @@ Encore.go deployment wrapper for the SIXT/Tensorlake MCP server.
 ## Endpoints
 
 - `POST /mcp` — MCP Streamable HTTP endpoint (stateless, JSON response mode)
-- `GET /healthz` — health check
+- `GET /status` — health check
 
 `/mcp` requires `Authorization: Bearer <token>`.
 
