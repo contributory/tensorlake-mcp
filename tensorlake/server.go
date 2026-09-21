@@ -39,6 +39,8 @@ type server struct {
 	apiKey      string
 	sandboxID   string
 	sandboxMu   sync.Mutex
+	homeDir     string
+	homeMu      sync.Mutex
 	bgMu        sync.Mutex
 	bgProcesses map[string]*bgProcess
 	bgCounter   int
@@ -123,6 +125,29 @@ func (s *server) ensureSandbox(ctx context.Context) (string, error) {
 	return "", fmt.Errorf("no running Tensorlake sandbox available; configure Encore secret TENSORLAKE_SANDBOX_ID with an existing running sandbox ID")
 }
 
+// sandboxHomeDir resolves and caches the sandbox user's $HOME directory.
+func (s *server) sandboxHomeDir(ctx context.Context) (string, error) {
+	s.homeMu.Lock()
+	defer s.homeMu.Unlock()
+
+	if s.homeDir != "" {
+		return s.homeDir, nil
+	}
+
+	_, stdout, stderr, err := s.runCommand(ctx, `printf '%s' "$HOME"`, 10, "/")
+	if err != nil {
+		return "", fmt.Errorf("failed to resolve sandbox home directory: %w", err)
+	}
+
+	home := strings.TrimSpace(stdout)
+	if home == "" || !filepath.IsAbs(home) {
+		return "", fmt.Errorf("failed to resolve sandbox home directory: stdout=%q stderr=%q", stdout, stderr)
+	}
+
+	s.homeDir = home
+	return home, nil
+}
+
 const maxOutputBytes = 100 * 1024 // 100KB
 
 func truncateOutput(s string) string {
@@ -152,6 +177,12 @@ func (s *server) runCommand(ctx context.Context, command string, timeoutSec int,
 	timeout := cmp.Or(timeoutSec, 30)
 	ctx, cancel := context.WithTimeout(ctx, time.Duration(timeout)*time.Second)
 	defer cancel()
+
+	// Tensorlake starts processes at / when no working directory is supplied.
+	// Make the sandbox user's $HOME the default workspace instead.
+	if workingDir == "" {
+		command = `cd "$HOME" && ` + command
+	}
 
 	// Retry process start — the sandbox container may still be initializing.
 	var proc *tensorlake.ProcessInfo

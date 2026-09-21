@@ -108,7 +108,11 @@ func (s *server) Parse(ctx context.Context, req *mcp.CallToolRequest, in *ParseI
 		base := filepath.Base(in.Path)
 		ext := filepath.Ext(base)
 		name := strings.TrimSuffix(base, ext)
-		outputPath = "/data/parsed/" + name + ".md"
+		home, err := s.sandboxHomeDir(ctx)
+		if err != nil {
+			return newToolResultError(err)
+		}
+		outputPath = filepath.Join(home, "parsed", name+".md")
 	}
 
 	// Ensure parent directory exists.

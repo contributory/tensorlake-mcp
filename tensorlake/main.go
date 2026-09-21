@@ -75,7 +75,7 @@ func newMCPServer(apiKey string) (*mcp.Server, *server) {
 	}, &mcp.ServerOptions{
 		Instructions: "Tensorlake MCP server provides a cloud sandbox environment for document processing. " +
 			"Upload documents, parse them with advanced AI, and use standard tools (bash, file_read, file_edit, grep, glob) " +
-			"to work with the results. All files live in the sandbox filesystem under /data.\n\n" +
+			"to work with the results. The sandbox user home directory ($HOME) is the default workspace.\n\n" +
 			"IMPORTANT: Prefer dedicated tools over bash for file operations:\n" +
 			" - To read files: use file_read (NOT cat/head/tail via bash)\n" +
 			" - To edit files: use file_edit (NOT sed/awk via bash)\n" +
@@ -100,14 +100,14 @@ func newMCPServer(apiKey string) (*mcp.Server, *server) {
 			"git operations, and other system commands that dedicated tools cannot handle.\n\n" +
 			"Tips:\n" +
 			" - Chain dependent commands with '&&'. Use ';' only when you don't care if earlier commands fail.\n" +
-			" - Use absolute paths. The default working directory is /data.\n" +
+			" - Use absolute paths. The default working directory is $HOME.\n" +
 			" - If a command produces no output, check stderr in the response.",
 		InputSchema: &jsonschema.Schema{
 			Type: "object",
 			Properties: map[string]*jsonschema.Schema{
 				"command":           {Type: "string", Description: "The shell command to execute."},
 				"timeout_sec":       {Type: "integer", Description: "Timeout in seconds (max 300). Default 30."},
-				"working_dir":       {Type: "string", Description: "Working directory. Default /data."},
+				"working_dir":       {Type: "string", Description: "Working directory. Default $HOME."},
 				"description":       {Type: "string", Description: "Human-readable description of what this command does."},
 				"run_in_background": {Type: "boolean", Description: "Run the command in the background. Returns a process_id immediately. Use bash_status to check results."},
 			},
@@ -201,12 +201,12 @@ func newMCPServer(apiKey string) (*mcp.Server, *server) {
 			" - Supports regex syntax (e.g., 'log.*Error', 'function\\s+\\w+').\n" +
 			" - Filter files with the glob parameter (e.g., '*.py', '*.go').\n" +
 			" - Results are truncated at 200 matches. Use the glob filter to narrow results.\n" +
-			" - Default search path is /data.",
+			" - Default search path is $HOME.",
 		InputSchema: &jsonschema.Schema{
 			Type: "object",
 			Properties: map[string]*jsonschema.Schema{
 				"pattern":     {Type: "string", Description: "Regex pattern to search for."},
-				"path":        {Type: "string", Description: "Directory or file to search in. Default /data."},
+				"path":        {Type: "string", Description: "Directory or file to search in. Default $HOME."},
 				"glob":        {Type: "string", Description: "File glob filter, e.g. '*.py', '*.txt'."},
 				"output_mode": {Type: "string", Description: "Output mode: 'content' (matching lines with line numbers, default), 'files_with_matches' (file paths only), 'count' (match counts per file)."},
 				"before":      {Type: "integer", Description: "Number of lines to show before each match (-B). Only for output_mode 'content'."},
@@ -226,12 +226,12 @@ func newMCPServer(apiKey string) (*mcp.Server, *server) {
 			" - Use this tool instead of find/ls via bash when searching for files.\n" +
 			" - Supports glob patterns like '*.pdf', '*.py', 'report*'.\n" +
 			" - Results are truncated at 500 entries.\n" +
-			" - Default search path is /data.",
+			" - Default search path is $HOME.",
 		InputSchema: &jsonschema.Schema{
 			Type: "object",
 			Properties: map[string]*jsonschema.Schema{
 				"pattern": {Type: "string", Description: "Glob pattern to match files against, e.g. '*.pdf', '*.py'."},
-				"path":    {Type: "string", Description: "Base directory to search in. Default /data."},
+				"path":    {Type: "string", Description: "Base directory to search in. Default $HOME."},
 			},
 			Required: []string{"pattern"},
 		},
@@ -244,12 +244,12 @@ func newMCPServer(apiKey string) (*mcp.Server, *server) {
 			" - HTTP/HTTPS URL: 'https://example.com/file.pdf'\n" +
 			" - Local file: 'file:///path/to/local/file.pdf'\n" +
 			" - Data URI: 'data:raw content here'\n\n" +
-			"The file is written to the sandbox filesystem. Default destination is /data/<filename>.",
+			"The file is written to the sandbox filesystem. Default destination is $HOME/<filename>.",
 		InputSchema: &jsonschema.Schema{
 			Type: "object",
 			Properties: map[string]*jsonschema.Schema{
 				"source":      {Type: "string", Description: "URL (http/https), local path (file://), or data URI (data:) of the file to upload."},
-				"destination": {Type: "string", Description: "Destination path in the sandbox. Default: /data/<filename>."},
+				"destination": {Type: "string", Description: "Destination path in the sandbox. Default: $HOME/<filename>."},
 			},
 			Required: []string{"source"},
 		},
@@ -261,13 +261,13 @@ func newMCPServer(apiKey string) (*mcp.Server, *server) {
 			"from PDFs and other documents, then writes the result as markdown.\n\n" +
 			"Usage:\n" +
 			" - Upload the document first with the upload tool.\n" +
-			" - The parsed markdown is written to /data/parsed/<basename>.md by default.\n" +
+			" - The parsed markdown is written to $HOME/parsed/<basename>.md by default.\n" +
 			" - After parsing, use file_read to inspect the result.",
 		InputSchema: &jsonschema.Schema{
 			Type: "object",
 			Properties: map[string]*jsonschema.Schema{
 				"path":        {Type: "string", Description: "Path to the document in the sandbox."},
-				"output_path": {Type: "string", Description: "Where to write the parsed result. Default: /data/parsed/<basename>.md."},
+				"output_path": {Type: "string", Description: "Where to write the parsed result. Default: $HOME/parsed/<basename>.md."},
 			},
 			Required: []string{"path"},
 		},

@@ -15,7 +15,6 @@
 package tensorlake
 
 import (
-	"cmp"
 	"context"
 	"fmt"
 	"strings"
@@ -29,7 +28,14 @@ type GlobInput struct {
 }
 
 func (s *server) Glob(ctx context.Context, req *mcp.CallToolRequest, in *GlobInput) (*mcp.CallToolResult, any, error) {
-	path := cmp.Or(in.Path, "/data")
+	path := in.Path
+	if path == "" {
+		home, err := s.sandboxHomeDir(ctx)
+		if err != nil {
+			return newToolResultError(err)
+		}
+		path = home
+	}
 
 	// Use find with a shell-safe pattern.
 	// For ** patterns (recursive), strip ** prefix and use find with -name on the file part.

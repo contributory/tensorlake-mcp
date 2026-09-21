@@ -95,7 +95,11 @@ func (s *server) Upload(ctx context.Context, req *mcp.CallToolRequest, in *Uploa
 
 	dest := in.Destination
 	if dest == "" {
-		dest = "/data/" + fileName
+		home, err := s.sandboxHomeDir(ctx)
+		if err != nil {
+			return newToolResultError(err)
+		}
+		dest = filepath.Join(home, fileName)
 	}
 
 	if err := s.tl.WriteSandboxFile(ctx, sandboxID, dest, reader); err != nil {

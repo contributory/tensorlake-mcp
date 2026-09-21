@@ -36,7 +36,14 @@ type GrepInput struct {
 }
 
 func (s *server) Grep(ctx context.Context, req *mcp.CallToolRequest, in *GrepInput) (*mcp.CallToolResult, any, error) {
-	path := cmp.Or(in.Path, "/data")
+	path := in.Path
+	if path == "" {
+		home, err := s.sandboxHomeDir(ctx)
+		if err != nil {
+			return newToolResultError(err)
+		}
+		path = home
+	}
 	mode := cmp.Or(in.OutputMode, "content")
 	headLimit := cmp.Or(in.HeadLimit, 200)
 
