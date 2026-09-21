@@ -66,14 +66,14 @@ func (s *server) sessionFilePath() string {
 
 // loadPersistedSandbox tries to restore a sandbox ID from disk and validates it is still running.
 func (s *server) loadPersistedSandbox(ctx context.Context) (string, bool) {
-	// Check env var override first.
-	if id := os.Getenv("TENSORLAKE_SANDBOX_ID"); id != "" {
+	// Encore injects the configured sandbox through the service secret.
+	if id := strings.TrimSpace(secrets.TENSORLAKE_SANDBOX_ID); id != "" {
 		info, err := s.tl.GetSandbox(ctx, id)
 		if err == nil && info.Status == tensorlake.SandboxStatusRunning {
-			slog.Info("reusing sandbox from TENSORLAKE_SANDBOX_ID", "sandbox_id", id)
+			slog.Info("reusing sandbox from Encore secret", "sandbox_id", id)
 			return id, true
 		}
-		slog.Warn("TENSORLAKE_SANDBOX_ID sandbox not running, creating new one", "sandbox_id", id)
+		slog.Warn("configured Encore sandbox is not running", "sandbox_id", id)
 	}
 
 	// Try temp file.
@@ -88,7 +88,7 @@ func (s *server) loadPersistedSandbox(ctx context.Context) (string, bool) {
 
 	info, err := s.tl.GetSandbox(ctx, id)
 	if err != nil || info.Status != tensorlake.SandboxStatusRunning {
-		slog.Info("persisted sandbox no longer running, creating new one", "sandbox_id", id)
+		slog.Info("persisted sandbox is no longer running", "sandbox_id", id)
 		os.Remove(s.sessionFilePath())
 		return "", false
 	}
@@ -104,8 +104,9 @@ func (s *server) persistSandboxID(id string) {
 	}
 }
 
-// ensureSandbox lazily creates a sandbox on first call and returns its ID.
-// It first tries to restore a persisted session from a prior server run.
+// ensureSandbox returns an existing running sandbox ID.
+// It never creates a sandbox; callers must configure TENSORLAKE_SANDBOX_ID as an Encore secret
+// or have a previously persisted sandbox ID that is still running.
 func (s *server) ensureSandbox(ctx context.Context) (string, error) {
 	s.sandboxMu.Lock()
 	defer s.sandboxMu.Unlock()
@@ -114,49 +115,12 @@ func (s *server) ensureSandbox(ctx context.Context) (string, error) {
 		return s.sandboxID, nil
 	}
 
-	// Try to restore a persisted sandbox.
 	if id, ok := s.loadPersistedSandbox(ctx); ok {
 		s.sandboxID = id
 		return id, nil
 	}
 
-	timeout := int64(tlSandboxTimeoutSecs)
-	resp, err := s.tl.CreateSandbox(ctx, &tensorlake.CreateSandboxRequest{
-		TimeoutSecs: &timeout,
-	})
-	if err != nil {
-		return "", fmt.Errorf("failed to create sandbox: %w", err)
-	}
-
-	// Poll until sandbox is running.
-	deadline := time.Now().Add(60 * time.Second)
-	for {
-		info, err := s.tl.GetSandbox(ctx, resp.SandboxId)
-		if err != nil {
-			return "", fmt.Errorf("failed to get sandbox status: %w", err)
-		}
-		if info.Status == tensorlake.SandboxStatusRunning {
-			break
-		}
-		if info.Status == tensorlake.SandboxStatusTerminated {
-			return "", fmt.Errorf("sandbox terminated unexpectedly")
-		}
-		if time.Now().After(deadline) {
-			return "", fmt.Errorf("sandbox failed to start within 60s (status: %s)", info.Status)
-		}
-		time.Sleep(500 * time.Millisecond)
-	}
-
-	slog.Info("sandbox created", "sandbox_id", resp.SandboxId)
-	s.sandboxID = resp.SandboxId
-	s.persistSandboxID(s.sandboxID)
-
-	// Create /data directory for the default workspace.
-	if err := s.tl.WriteSandboxFile(ctx, s.sandboxID, "/data/.keep", strings.NewReader("")); err != nil {
-		slog.Warn("failed to create /data directory", "error", err)
-	}
-
-	return s.sandboxID, nil
+	return "", fmt.Errorf("no running Tensorlake sandbox available; configure Encore secret TENSORLAKE_SANDBOX_ID with an existing running sandbox ID")
 }
 
 const maxOutputBytes = 100 * 1024 // 100KB

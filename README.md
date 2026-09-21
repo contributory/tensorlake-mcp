@@ -39,8 +39,15 @@ Each distinct Tensorlake API key gets its own Tensorlake client, sandbox state, 
 
 The MCP transport itself remains stateless. The active Tensorlake sandbox is process-local plus a temporary persisted sandbox-ID file, so horizontally scaling the service still requires a shared session store if requests for one API key can land on different instances.
 
-## Local validation
+## Sandbox configuration
 
+The service never creates a Tensorlake sandbox automatically. Configure the existing running sandbox through the Encore secret `TENSORLAKE_SANDBOX_ID`:
+
+```bash
+encore secret set --env staging TENSORLAKE_SANDBOX_ID
+```
+
+Set the secret value to the sandbox ID you want the MCP service to reuse. Encore injects this value into the Go `secrets` struct at runtime.
 ```bash
 encore test ./...
 ```
