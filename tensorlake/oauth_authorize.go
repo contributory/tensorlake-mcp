@@ -111,10 +111,18 @@ func renderAuthorizePage(w http.ResponseWriter, client *oauthClient, in authoriz
 	if clientName == "" {
 		clientName = client.ID
 	}
+	redirectOrigin := ""
+	if redirect, err := url.Parse(in.RedirectURI); err == nil && redirect.Scheme != "" && redirect.Host != "" {
+		redirectOrigin = redirect.Scheme + "://" + redirect.Host
+	}
+	formAction := "form-action 'self'"
+	if redirectOrigin != "" {
+		formAction += " " + redirectOrigin
+	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("Referrer-Policy", "no-referrer")
-	w.Header().Set("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'")
+	w.Header().Set("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; "+formAction+"; base-uri 'none'; frame-ancestors 'none'")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	_ = authorizePage.Execute(w, map[string]any{
 		"ClientName": clientName,
@@ -170,7 +178,7 @@ func completeAuthorization(w http.ResponseWriter, req *http.Request, in authoriz
 	}
 	query.Set("iss", requestOrigin(req))
 	redirect.RawQuery = query.Encode()
-	http.Redirect(w, req, redirect.String(), http.StatusFound)
+	http.Redirect(w, req, redirect.String(), http.StatusSeeOther)
 }
 
 // OAuthAuthorize asks the user for a Tensorlake API key and issues an OAuth authorization code.

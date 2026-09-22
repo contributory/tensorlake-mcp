@@ -115,3 +115,16 @@ func TestOAuthMetadataAdvertisesChatGPTRequirements(t *testing.T) {
 		}
 	}
 }
+
+func TestAuthorizePageAllowsRegisteredRedirectOriginInCSP(t *testing.T) {
+	w := httptest.NewRecorder()
+	renderAuthorizePage(w, &oauthClient{ID: "chatgpt", Name: "ChatGPT"}, authorizationRequest{
+		ClientID:    "https://chatgpt.com/oauth/client.json",
+		RedirectURI: "https://chatgpt.com/connector_platform_oauth_redirect",
+		Scope:       "mcp",
+	})
+	csp := w.Header().Get("Content-Security-Policy")
+	if !strings.Contains(csp, "form-action 'self' https://chatgpt.com") {
+		t.Fatalf("authorize CSP does not allow registered callback origin: %q", csp)
+	}
+}
