@@ -4,9 +4,9 @@ go 1.27.0
 
 require (
 	encore.dev v1.57.13
-	github.com/google/jsonschema-go v0.4.3
+	github.com/google/jsonschema-go v0.4.2
 	github.com/google/uuid v1.6.0
-	github.com/modelcontextprotocol/go-sdk v1.8.0
+	github.com/modelcontextprotocol/go-sdk v1.5.0
 	github.com/sixt/tensorlake-go v0.3.0
 )
 
@@ -24,5 +24,4 @@ require (
 	golang.org/x/sync v0.20.0 // indirect
 	golang.org/x/sys v0.42.0 // indirect
 	golang.org/x/text v0.29.0 // indirect
-	golang.org/x/time v0.15.0 // indirect
 )
