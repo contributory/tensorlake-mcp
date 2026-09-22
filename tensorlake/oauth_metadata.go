@@ -136,23 +136,6 @@ func writeAuthorizationServerMetadata(w http.ResponseWriter, req *http.Request) 
 	})
 }
 
-func writeAuthorizationServerMetadata(w http.ResponseWriter, req *http.Request) {
-	origin := requestOrigin(req)
-	writeJSON(w, http.StatusOK, map[string]any{
-		"issuer": origin,
-		"authorization_response_iss_parameter_supported": true,
-		"authorization_endpoint":                         origin + "/oauth/authorize",
-		"token_endpoint":                                 origin + "/oauth/token",
-		"registration_endpoint":                          origin + "/oauth/register",
-		"response_types_supported":                       []string{"code"},
-		"grant_types_supported":                          []string{"authorization_code", "refresh_token"},
-		"code_challenge_methods_supported":               []string{"S256"},
-		"token_endpoint_auth_methods_supported":          []string{"none"},
-		"scopes_supported":                               []string{oauthScopeMCP, oauthScopeOffline},
-		"client_id_metadata_document_supported":          true,
-	})
-}
-
 // OAuthAuthorizationServer publishes RFC 8414 authorization-server metadata.
 //
 //encore:api public raw path=/.well-known/oauth-authorization-server
