@@ -52,9 +52,8 @@ func createOAuthSession(req *http.Request, tenantID, clientID, scope string) (*o
 	}, nil
 }
 
-func exchangeAuthorizationCode(w http.ResponseWriter, req *http.Request) {
+func exchangeAuthorizationCode(w http.ResponseWriter, req *http.Request, clientID string) {
 	code := strings.TrimSpace(req.FormValue("code"))
-	clientID := strings.TrimSpace(req.FormValue("client_id"))
 	redirectURI := strings.TrimSpace(req.FormValue("redirect_uri"))
 	verifier := strings.TrimSpace(req.FormValue("code_verifier"))
 	resource := strings.TrimSpace(req.FormValue("resource"))
@@ -103,9 +102,8 @@ func exchangeAuthorizationCode(w http.ResponseWriter, req *http.Request) {
 	writeJSON(w, http.StatusOK, response)
 }
 
-func rotateRefreshToken(w http.ResponseWriter, req *http.Request) {
+func rotateRefreshToken(w http.ResponseWriter, req *http.Request, clientID string) {
 	refreshToken := strings.TrimSpace(req.FormValue("refresh_token"))
-	clientID := strings.TrimSpace(req.FormValue("client_id"))
 	resource := strings.TrimSpace(req.FormValue("resource"))
 	if refreshToken == "" || clientID == "" {
 		writeOAuthError(w, http.StatusBadRequest, "invalid_request", "refresh_token and client_id are required")
@@ -169,11 +167,17 @@ func OAuthToken(w http.ResponseWriter, req *http.Request) {
 		writeOAuthError(w, http.StatusBadRequest, "invalid_request", "invalid token request")
 		return
 	}
+	clientID, err := authenticateTokenClient(req)
+	if err != nil {
+		writeOAuthError(w, http.StatusUnauthorized, "invalid_client", err.Error())
+		return
+	}
+
 	switch req.FormValue("grant_type") {
 	case "authorization_code":
-		exchangeAuthorizationCode(w, req)
+		exchangeAuthorizationCode(w, req, clientID)
 	case "refresh_token":
-		rotateRefreshToken(w, req)
+		rotateRefreshToken(w, req, clientID)
 	default:
 		writeOAuthError(w, http.StatusBadRequest, "unsupported_grant_type", "supported grants are authorization_code and refresh_token")
 	}
