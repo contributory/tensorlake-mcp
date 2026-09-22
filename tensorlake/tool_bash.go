@@ -45,6 +45,10 @@ type bgProcess struct {
 }
 
 func (s *server) Bash(ctx context.Context, req *mcp.CallToolRequest, in *BashInput) (*mcp.CallToolResult, any, error) {
+	if result := s.oauthRequiredResult(ctx); result != nil {
+		return result, nil, nil
+	}
+
 	if in.Description != "" {
 		slog.Info("bash", "description", in.Description, "command", in.Command)
 	}
@@ -112,6 +116,10 @@ type BashStatusInput struct {
 }
 
 func (s *server) BashStatus(ctx context.Context, req *mcp.CallToolRequest, in *BashStatusInput) (*mcp.CallToolResult, any, error) {
+	if result := s.oauthRequiredResult(ctx); result != nil {
+		return result, nil, nil
+	}
+
 	s.bgMu.Lock()
 	proc, ok := s.bgProcesses[in.ProcessID]
 	s.bgMu.Unlock()

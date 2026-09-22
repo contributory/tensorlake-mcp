@@ -46,6 +46,10 @@ var imageExtensions = map[string]string{
 }
 
 func (s *server) FileRead(ctx context.Context, req *mcp.CallToolRequest, in *FileReadInput) (*mcp.CallToolResult, any, error) {
+	if result := s.oauthRequiredResult(ctx); result != nil {
+		return result, nil, nil
+	}
+
 	sandboxID, err := s.ensureSandbox(ctx)
 	if err != nil {
 		return newToolResultError(fmt.Errorf("failed to ensure sandbox: %w", err))

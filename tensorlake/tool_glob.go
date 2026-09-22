@@ -28,6 +28,10 @@ type GlobInput struct {
 }
 
 func (s *server) Glob(ctx context.Context, req *mcp.CallToolRequest, in *GlobInput) (*mcp.CallToolResult, any, error) {
+	if result := s.oauthRequiredResult(ctx); result != nil {
+		return result, nil, nil
+	}
+
 	path := in.Path
 	if path == "" {
 		home, err := s.sandboxHomeDir(ctx)

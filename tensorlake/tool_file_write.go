@@ -29,6 +29,10 @@ type FileWriteInput struct {
 }
 
 func (s *server) FileWrite(ctx context.Context, req *mcp.CallToolRequest, in *FileWriteInput) (*mcp.CallToolResult, any, error) {
+	if result := s.oauthRequiredResult(ctx); result != nil {
+		return result, nil, nil
+	}
+
 	sandboxID, err := s.ensureSandbox(ctx)
 	if err != nil {
 		return newToolResultError(fmt.Errorf("failed to ensure sandbox: %w", err))

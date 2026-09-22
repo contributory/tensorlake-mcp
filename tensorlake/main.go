@@ -27,7 +27,7 @@ import (
 
 const (
 	serverName    = "tensorlake-mcp"
-	serverVersion = "v0.3.0"
+	serverVersion = "v0.4.0"
 )
 
 var (
@@ -68,6 +68,16 @@ func init() {
 	}
 }
 
+func oauthToolMeta() mcp.Meta {
+	return mcp.Meta{
+		"securitySchemes": []map[string]any{
+			{"type": "oauth2", "scopes": []string{oauthScopeMCP}},
+		},
+	}
+}
+
+func boolPtr(value bool) *bool { return &value }
+
 func newMCPServer(apiKey string) (*mcp.Server, *server) {
 	impl := mcp.NewServer(&mcp.Implementation{
 		Name:    serverName,
@@ -82,13 +92,58 @@ func newMCPServer(apiKey string) (*mcp.Server, *server) {
 			" - To search file contents: use grep (NOT grep via bash)\n" +
 			" - To find files by name: use glob (NOT find/ls via bash)\n" +
 			"Reserve bash for system commands, installing packages, running scripts, and operations " +
-			"that the dedicated tools cannot handle.",
+			"that the dedicated tools cannot handle.\n\n" +
+			"SANDBOX CONFIGURATION: normal tools automatically use the primary sandbox saved for this account. " +
+			"list_sandboxes and set_sandbox are administrative/configuration tools. DO NOT call them routinely, " +
+			"before normal operations, or once per session. Use them only when the user explicitly asks to inspect/switch sandboxes, " +
+			"when no primary sandbox is configured, or when the current primary sandbox must be replaced.",
 		HasTools: true,
 	})
 
 	s := newServer(apiKey)
 
 	mcp.AddTool(impl, &mcp.Tool{
+		Meta: oauthToolMeta(),
+		Name: "list_sandboxes",
+		Description: "Administrative discovery tool that lists Tensorlake sandboxes and marks the saved primary sandbox. " +
+			"DO NOT call this routinely, before normal file/bash/parse operations, or once per session. " +
+			"Only call when the user explicitly asks to inspect sandboxes, when no primary sandbox is configured, " +
+			"when the current primary sandbox is unavailable, or when a sandbox switch is genuinely necessary.",
+		Annotations: &mcp.ToolAnnotations{
+			ReadOnlyHint: true,
+		},
+		InputSchema: &jsonschema.Schema{
+			Type: "object",
+			Properties: map[string]*jsonschema.Schema{
+				"limit":  {Type: "integer", Description: "Maximum sandboxes to return. Default 50, maximum 100."},
+				"cursor": {Type: "string", Description: "Pagination cursor returned by a previous list_sandboxes call."},
+				"status": {Type: "string", Description: "Optional Tensorlake sandbox status filter, for example running."},
+			},
+		},
+	}, s.ListSandboxes)
+
+	mcp.AddTool(impl, &mcp.Tool{
+		Meta: oauthToolMeta(),
+		Name: "set_sandbox",
+		Description: "Administrative configuration tool that persists the primary Tensorlake sandbox used by all normal MCP tools. " +
+			"DO NOT call this routinely or once per session. Only call when the user explicitly requests a switch, " +
+			"when no primary sandbox is configured, or when the saved primary sandbox must be replaced. " +
+			"The selected sandbox must already exist and be running.",
+		Annotations: &mcp.ToolAnnotations{
+			DestructiveHint: boolPtr(false),
+			IdempotentHint:  true,
+		},
+		InputSchema: &jsonschema.Schema{
+			Type: "object",
+			Properties: map[string]*jsonschema.Schema{
+				"sandbox_id": {Type: "string", Description: "ID of an existing running Tensorlake sandbox to save as the primary sandbox."},
+			},
+			Required: []string{"sandbox_id"},
+		},
+	}, s.SetSandbox)
+
+	mcp.AddTool(impl, &mcp.Tool{
+		Meta: oauthToolMeta(),
 		Name: "bash",
 		Description: "Execute a shell command in the cloud sandbox and return its exit code, stdout, and stderr.\n\n" +
 			"IMPORTANT: Do NOT use bash when a dedicated tool can do the job:\n" +
@@ -116,6 +171,7 @@ func newMCPServer(apiKey string) (*mcp.Server, *server) {
 	}, s.Bash)
 
 	mcp.AddTool(impl, &mcp.Tool{
+		Meta: oauthToolMeta(),
 		Name: "bash_status",
 		Description: "Check the status or retrieve results of a background bash command.\n\n" +
 			"Pass the process_id returned by bash with run_in_background=true. " +
@@ -130,6 +186,7 @@ func newMCPServer(apiKey string) (*mcp.Server, *server) {
 	}, s.BashStatus)
 
 	mcp.AddTool(impl, &mcp.Tool{
+		Meta: oauthToolMeta(),
 		Name: "file_read",
 		Description: "Read a file from the sandbox filesystem. Returns content with line numbers (cat -n format).\n\n" +
 			"Usage:\n" +
@@ -154,6 +211,7 @@ func newMCPServer(apiKey string) (*mcp.Server, *server) {
 	}, s.FileRead)
 
 	mcp.AddTool(impl, &mcp.Tool{
+		Meta: oauthToolMeta(),
 		Name: "file_edit",
 		Description: "Edit a file in the sandbox using exact string replacement.\n\n" +
 			"Usage:\n" +
@@ -177,6 +235,7 @@ func newMCPServer(apiKey string) (*mcp.Server, *server) {
 	}, s.FileEdit)
 
 	mcp.AddTool(impl, &mcp.Tool{
+		Meta: oauthToolMeta(),
 		Name: "file_write",
 		Description: "Write a file to the sandbox filesystem. Creates the file if it doesn't exist, or overwrites it entirely.\n\n" +
 			"Usage:\n" +
@@ -194,6 +253,7 @@ func newMCPServer(apiKey string) (*mcp.Server, *server) {
 	}, s.FileWrite)
 
 	mcp.AddTool(impl, &mcp.Tool{
+		Meta: oauthToolMeta(),
 		Name: "grep",
 		Description: "Search file contents in the sandbox by regex pattern. Returns matching lines with filename and line numbers.\n\n" +
 			"Usage:\n" +
@@ -220,6 +280,7 @@ func newMCPServer(apiKey string) (*mcp.Server, *server) {
 	}, s.Grep)
 
 	mcp.AddTool(impl, &mcp.Tool{
+		Meta: oauthToolMeta(),
 		Name: "glob",
 		Description: "Find files by name pattern in the sandbox. Returns matching file paths.\n\n" +
 			"Usage:\n" +
@@ -238,6 +299,7 @@ func newMCPServer(apiKey string) (*mcp.Server, *server) {
 	}, s.Glob)
 
 	mcp.AddTool(impl, &mcp.Tool{
+		Meta: oauthToolMeta(),
 		Name: "upload",
 		Description: "Upload a file into the sandbox filesystem from an external source.\n\n" +
 			"Supported sources:\n" +
@@ -256,6 +318,7 @@ func newMCPServer(apiKey string) (*mcp.Server, *server) {
 	}, s.Upload)
 
 	mcp.AddTool(impl, &mcp.Tool{
+		Meta: oauthToolMeta(),
 		Name: "parse",
 		Description: "Parse a document in the sandbox using Tensorlake AI. Extracts text, tables, and structure " +
 			"from PDFs and other documents, then writes the result as markdown.\n\n" +

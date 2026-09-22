@@ -36,6 +36,10 @@ type GrepInput struct {
 }
 
 func (s *server) Grep(ctx context.Context, req *mcp.CallToolRequest, in *GrepInput) (*mcp.CallToolResult, any, error) {
+	if result := s.oauthRequiredResult(ctx); result != nil {
+		return result, nil, nil
+	}
+
 	path := in.Path
 	if path == "" {
 		home, err := s.sandboxHomeDir(ctx)

@@ -3,6 +3,7 @@ package tensorlake
 import (
 	"context"
 	"crypto/sha256"
+	"errors"
 	"net/http"
 	"strings"
 	"sync"
@@ -47,6 +48,19 @@ func apiKeyFromRequest(req *http.Request) string {
 	return ""
 }
 
+func resolveTensorlakeAPIKey(req *http.Request) (string, error) {
+	credential := apiKeyFromRequest(req)
+	if credential == "" {
+		return "", nil
+	}
+	if strings.HasPrefix(credential, oauthAccessTokenPrefix) {
+		return apiKeyForOAuthAccessToken(req, credential)
+	}
+	// Backward compatibility: a non-OAuth Bearer value or the legacy query
+	// parameters are treated as a raw Tensorlake API key.
+	return credential, nil
+}
+
 func serverForAPIKey(apiKey string) *mcp.Server {
 	hash := sha256.Sum256([]byte(apiKey))
 
@@ -77,22 +91,26 @@ func handler() http.Handler {
 	return mcpHandler
 }
 
-// serveMCP extracts the caller's Tensorlake API key from either:
-//   - Authorization: Bearer <tensorlake-api-key> (preferred)
-//   - ?tensorlake_api_key=<tensorlake-api-key>
-//   - ?api_key=<tensorlake-api-key>
-//
-// The raw key is removed from the cloned request before handing it to the MCP
-// transport and is used only to select the caller-specific Tensorlake client.
+func writeOAuthChallenge(w http.ResponseWriter, req *http.Request) {
+	w.Header().Set("WWW-Authenticate", oauthChallenge(req))
+	w.Header().Set("Cache-Control", "no-store")
+	http.Error(w, "OAuth authorization required", http.StatusUnauthorized)
+}
+
+// serveMCP resolves a ChatGPT/MCP OAuth access token to its stored Tensorlake
+// API key. Raw Tensorlake Bearer/query credentials remain supported for
+// backwards compatibility with existing clients.
 func serveMCP(w http.ResponseWriter, req *http.Request) {
-	apiKey := apiKeyFromRequest(req)
-	if apiKey == "" {
-		w.Header().Set("WWW-Authenticate", `Bearer realm="tensorlake-mcp"`)
-		http.Error(w, "missing Tensorlake API key", http.StatusUnauthorized)
+	apiKey, err := resolveTensorlakeAPIKey(req)
+	if errors.Is(err, errInvalidAccessToken) {
+		apiKey = ""
+	} else if err != nil {
+		http.Error(w, "authorization service unavailable", http.StatusServiceUnavailable)
 		return
 	}
 
 	ctx := context.WithValue(req.Context(), tenantAPIKeyContextKey{}, apiKey)
+	ctx = context.WithValue(ctx, oauthChallengeContextKey{}, oauthChallenge(req))
 	cleanReq := req.Clone(ctx)
 	cleanReq.Header = req.Header.Clone()
 	cleanReq.Header.Del("Authorization")

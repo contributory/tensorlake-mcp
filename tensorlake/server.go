@@ -17,13 +17,10 @@ package tensorlake
 import (
 	"cmp"
 	"context"
-	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"io"
-	"log/slog"
 	"net/http"
-	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -37,6 +34,7 @@ import (
 type server struct {
 	tl          *tensorlake.Client
 	apiKey      string
+	tenantID    string
 	sandboxID   string
 	sandboxMu   sync.Mutex
 	homeDir     string
@@ -48,7 +46,8 @@ type server struct {
 
 func newServer(apiKey string) *server {
 	return &server{
-		apiKey: apiKey,
+		apiKey:   apiKey,
+		tenantID: tenantIDForAPIKey(apiKey),
 		tl: tensorlake.NewClient(
 			tensorlake.WithBaseURL(tlAPIBaseURL),
 			tensorlake.WithAPIKey(apiKey),
@@ -59,70 +58,29 @@ func newServer(apiKey string) *server {
 	}
 }
 
-// sessionFilePath returns a deterministic temp file path for persisting the sandbox ID.
-// The path is keyed by API key hash so different accounts don't collide.
-func (s *server) sessionFilePath() string {
-	h := sha256.Sum256([]byte(s.apiKey))
-	return filepath.Join(os.TempDir(), fmt.Sprintf("tensorlake-mcp-session-%x", h[:8]))
-}
-
-// loadPersistedSandbox tries to restore a sandbox ID from disk and validates it is still running.
-func (s *server) loadPersistedSandbox(ctx context.Context) (string, bool) {
-	// Encore injects the configured sandbox through the service secret.
-	if id := strings.TrimSpace(secrets.TENSORLAKE_SANDBOX_ID); id != "" {
-		info, err := s.tl.GetSandbox(ctx, id)
-		if err == nil && info.Status == tensorlake.SandboxStatusRunning {
-			slog.Info("reusing sandbox from Encore secret", "sandbox_id", id)
-			return id, true
-		}
-		slog.Warn("configured Encore sandbox is not running", "sandbox_id", id)
-	}
-
-	// Try temp file.
-	data, err := os.ReadFile(s.sessionFilePath())
-	if err != nil {
-		return "", false
-	}
-	id := strings.TrimSpace(string(data))
-	if id == "" {
-		return "", false
-	}
-
-	info, err := s.tl.GetSandbox(ctx, id)
-	if err != nil || info.Status != tensorlake.SandboxStatusRunning {
-		slog.Info("persisted sandbox is no longer running", "sandbox_id", id)
-		os.Remove(s.sessionFilePath())
-		return "", false
-	}
-
-	slog.Info("reusing persisted sandbox", "sandbox_id", id)
-	return id, true
-}
-
-// persistSandboxID writes the sandbox ID to disk.
-func (s *server) persistSandboxID(id string) {
-	if err := os.WriteFile(s.sessionFilePath(), []byte(id), 0o600); err != nil {
-		slog.Warn("failed to persist sandbox ID", "error", err)
-	}
-}
-
-// ensureSandbox returns an existing running sandbox ID.
-// It never creates a sandbox; callers must configure TENSORLAKE_SANDBOX_ID as an Encore secret
-// or have a previously persisted sandbox ID that is still running.
+// ensureSandbox returns the persisted primary sandbox ID for this Tensorlake account.
+// The Encore database is the source of truth so sandbox changes are immediately
+// visible across horizontally scaled MCP instances.
 func (s *server) ensureSandbox(ctx context.Context) (string, error) {
+	id, err := loadPrimarySandboxID(ctx, s.tenantID)
+	if err != nil {
+		return "", fmt.Errorf("failed to load primary Tensorlake sandbox: %w", err)
+	}
+	if id == "" {
+		return "", fmt.Errorf("no primary Tensorlake sandbox is configured; use list_sandboxes only if discovery is needed, then call set_sandbox once")
+	}
+
 	s.sandboxMu.Lock()
-	defer s.sandboxMu.Unlock()
+	changed := s.sandboxID != id
+	s.sandboxID = id
+	s.sandboxMu.Unlock()
 
-	if s.sandboxID != "" {
-		return s.sandboxID, nil
+	if changed {
+		s.homeMu.Lock()
+		s.homeDir = ""
+		s.homeMu.Unlock()
 	}
-
-	if id, ok := s.loadPersistedSandbox(ctx); ok {
-		s.sandboxID = id
-		return id, nil
-	}
-
-	return "", fmt.Errorf("no running Tensorlake sandbox available; configure Encore secret TENSORLAKE_SANDBOX_ID with an existing running sandbox ID")
+	return id, nil
 }
 
 // sandboxHomeDir resolves and caches the sandbox user's $HOME directory.
@@ -253,19 +211,15 @@ func (s *server) runCommand(ctx context.Context, command string, timeoutSec int,
 		truncateOutput(strings.Join(stderrResp.Lines, "\n")), nil
 }
 
-// CleanupSession deletes the sandbox and removes the persisted session file.
-func (s *server) CleanupSession(ctx context.Context) {
+// CleanupSession clears process-local caches only. User-owned Tensorlake sandboxes
+// and the persisted primary-sandbox selection are intentionally left untouched.
+func (s *server) CleanupSession(_ context.Context) {
 	s.sandboxMu.Lock()
-	defer s.sandboxMu.Unlock()
-	if s.sandboxID != "" {
-		if err := s.tl.DeleteSandbox(ctx, s.sandboxID); err != nil {
-			slog.Error("failed to delete sandbox", "sandbox_id", s.sandboxID, "error", err)
-		} else {
-			slog.Info("sandbox deleted", "sandbox_id", s.sandboxID)
-		}
-		os.Remove(s.sessionFilePath())
-		s.sandboxID = ""
-	}
+	s.sandboxID = ""
+	s.sandboxMu.Unlock()
+	s.homeMu.Lock()
+	s.homeDir = ""
+	s.homeMu.Unlock()
 }
 
 // sendProgress sends a progress notification if a progress token is available.
