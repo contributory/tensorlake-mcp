@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-const initializeBody = `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"test","version":"1.0"}}}`
+const initializeBody = "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"protocolVersion\":\"2025-11-25\",\"capabilities\":{},\"clientInfo\":{\"name\":\"test\",\"version\":\"1.0\"}}}"
 
 func newMCPRequest(target, body string) *http.Request {
 	req := httptest.NewRequest(http.MethodPost, target, strings.NewReader(body))
@@ -20,47 +20,40 @@ func newInitializeRequest(target string) *http.Request {
 	return newMCPRequest(target, initializeBody)
 }
 
-func TestMCPInitializeWithoutCredentialAllowsOAuthDiscovery(t *testing.T) {
+func TestMCPWithoutBearerRequiresOAuth(t *testing.T) {
 	req := newInitializeRequest("https://mcp.example.test/mcp")
 	w := httptest.NewRecorder()
 
 	serveMCP(w, req)
-	if w.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401, got %d: %s", w.Code, w.Body.String())
 	}
-	if !strings.Contains(w.Body.String(), `"serverInfo"`) {
-		t.Fatalf("initialize response missing serverInfo: %s", w.Body.String())
-	}
-}
-
-func TestUnauthenticatedToolListPublishesOAuthSecurityScheme(t *testing.T) {
-	req := newMCPRequest("https://mcp.example.test/mcp", `{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}`)
-	w := httptest.NewRecorder()
-
-	serveMCP(w, req)
-	if w.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
-	}
-	body := w.Body.String()
-	if !strings.Contains(body, `"securitySchemes"`) || !strings.Contains(body, `"oauth2"`) {
-		t.Fatalf("tool list missing OAuth security scheme: %s", body)
+	challenge := w.Header().Get("WWW-Authenticate")
+	if !strings.Contains(challenge, "resource_metadata=") || !strings.Contains(challenge, "scope=\"mcp\"") {
+		t.Fatalf("missing OAuth challenge: %q", challenge)
 	}
 }
 
-func TestUnauthenticatedToolCallReturnsMCPAuthChallenge(t *testing.T) {
-	req := newMCPRequest("https://mcp.example.test/mcp", `{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"bash","arguments":{"command":"true"}}}`)
+func TestUnauthenticatedToolListRequiresOAuthBeforeDiscovery(t *testing.T) {
+	req := newMCPRequest("https://mcp.example.test/mcp", "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/list\",\"params\":{}}")
 	w := httptest.NewRecorder()
 
 	serveMCP(w, req)
-	if w.Code != http.StatusOK {
-		t.Fatalf("expected MCP result over HTTP 200, got %d: %s", w.Code, w.Body.String())
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401 before tool discovery, got %d: %s", w.Code, w.Body.String())
 	}
-	body := w.Body.String()
-	if !strings.Contains(body, `"mcp/www_authenticate"`) {
-		t.Fatalf("tool auth error missing mcp/www_authenticate: %s", body)
+	if got := w.Header().Get("WWW-Authenticate"); !strings.Contains(got, "resource_metadata=") {
+		t.Fatalf("missing OAuth challenge: %q", got)
 	}
-	if !strings.Contains(body, `resource_metadata=`) || !strings.Contains(body, `error=\"invalid_token\"`) {
-		t.Fatalf("tool auth challenge missing required OAuth fields: %s", body)
+}
+
+func TestUnauthenticatedToolCallRequiresOAuthAtHTTPBoundary(t *testing.T) {
+	req := newMCPRequest("https://mcp.example.test/mcp", "{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"tools/call\",\"params\":{\"name\":\"bash\",\"arguments\":{\"command\":\"true\"}}}")
+	w := httptest.NewRecorder()
+
+	serveMCP(w, req)
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401, got %d: %s", w.Code, w.Body.String())
 	}
 }
 
@@ -73,28 +66,23 @@ func TestMCPInitializeWithBearerTensorlakeAPIKey(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
 	}
-	if !strings.Contains(w.Body.String(), `"serverInfo"`) {
+	if !strings.Contains(w.Body.String(), "\"serverInfo\"") {
 		t.Fatalf("initialize response missing serverInfo: %s", w.Body.String())
 	}
 }
 
-func TestMCPInitializeWithTensorlakeAPIKeyQueryParam(t *testing.T) {
-	req := newInitializeRequest("/mcp?tensorlake_api_key=test-query-key")
-	w := httptest.NewRecorder()
+func TestQueryAPIKeyDoesNotBypassRequiredOAuth(t *testing.T) {
+	for _, target := range []string{
+		"/mcp?tensorlake_api_key=test-query-key",
+		"/mcp?api_key=test-query-alias",
+	} {
+		req := newInitializeRequest(target)
+		w := httptest.NewRecorder()
 
-	serveMCP(w, req)
-	if w.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
-	}
-}
-
-func TestMCPInitializeWithAPIKeyQueryAlias(t *testing.T) {
-	req := newInitializeRequest("/mcp?api_key=test-query-alias")
-	w := httptest.NewRecorder()
-
-	serveMCP(w, req)
-	if w.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+		serveMCP(w, req)
+		if w.Code != http.StatusUnauthorized {
+			t.Fatalf("%s: expected 401, got %d: %s", target, w.Code, w.Body.String())
+		}
 	}
 }
 
@@ -116,10 +104,11 @@ func TestOAuthMetadataAdvertisesChatGPTRequirements(t *testing.T) {
 	}
 	body := w.Body.String()
 	for _, required := range []string{
-		`"authorization_response_iss_parameter_supported":true`,
-		`"client_id_metadata_document_supported":true`,
-		`"S256"`,
-		`"none"`,
+		"\"authorization_response_iss_parameter_supported\":true",
+		"\"client_id_metadata_document_supported\":true",
+		"\"S256\"",
+		"\"none\"",
+		"\"private_key_jwt\"",
 	} {
 		if !strings.Contains(body, required) {
 			t.Fatalf("OAuth metadata missing %s: %s", required, body)

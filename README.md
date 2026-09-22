@@ -37,7 +37,7 @@ For backward compatibility, a raw Tensorlake API key can still be supplied as:
 Authorization: Bearer <TENSORLAKE_API_KEY>
 ```
 
-or with `?tensorlake_api_key=` / `?api_key=`. OAuth is preferred because clients never receive the Tensorlake API key.
+Query-string API keys do not bypass OAuth. A raw `Authorization: Bearer` Tensorlake API key is the only legacy bypass; otherwise OAuth is required before MCP initialization or tool discovery.
 
 ## Sandbox selection
 

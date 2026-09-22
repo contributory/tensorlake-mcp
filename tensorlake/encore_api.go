@@ -30,22 +30,12 @@ func apiKeyFromRequest(req *http.Request) string {
 		return value
 	}
 
-	if auth := strings.TrimSpace(req.Header.Get("Authorization")); auth != "" {
-		parts := strings.Fields(auth)
-		if len(parts) == 2 && strings.EqualFold(parts[0], "Bearer") {
-			if key := strings.TrimSpace(parts[1]); key != "" {
-				return key
-			}
-		}
+	auth := strings.TrimSpace(req.Header.Get("Authorization"))
+	parts := strings.Fields(auth)
+	if len(parts) != 2 || !strings.EqualFold(parts[0], "Bearer") {
+		return ""
 	}
-
-	for _, name := range []string{"tensorlake_api_key", "api_key"} {
-		if key := strings.TrimSpace(req.URL.Query().Get(name)); key != "" {
-			return key
-		}
-	}
-
-	return ""
+	return strings.TrimSpace(parts[1])
 }
 
 func resolveTensorlakeAPIKey(req *http.Request) (string, error) {
@@ -98,13 +88,22 @@ func writeOAuthChallenge(w http.ResponseWriter, req *http.Request) {
 }
 
 // serveMCP resolves a ChatGPT/MCP OAuth access token to its stored Tensorlake
-// API key. Raw Tensorlake Bearer/query credentials remain supported for
-// backwards compatibility with existing clients.
+// API key. Raw Tensorlake Bearer credentials remain supported for
+// backwards compatibility with existing clients. Requests without a Bearer
+// token are challenged for OAuth before MCP initialize or tool discovery.
 func serveMCP(w http.ResponseWriter, req *http.Request) {
+	credential := apiKeyFromRequest(req)
+	if credential == "" {
+		writeOAuthChallenge(w, req)
+		return
+	}
+
 	apiKey, err := resolveTensorlakeAPIKey(req)
 	if errors.Is(err, errInvalidAccessToken) {
-		apiKey = ""
-	} else if err != nil {
+		writeOAuthChallenge(w, req)
+		return
+	}
+	if err != nil {
 		http.Error(w, "authorization service unavailable", http.StatusServiceUnavailable)
 		return
 	}
