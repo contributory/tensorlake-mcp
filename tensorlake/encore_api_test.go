@@ -59,7 +59,7 @@ func TestUnauthenticatedToolCallReturnsMCPAuthChallenge(t *testing.T) {
 	if !strings.Contains(body, `"mcp/www_authenticate"`) {
 		t.Fatalf("tool auth error missing mcp/www_authenticate: %s", body)
 	}
-	if !strings.Contains(body, `resource_metadata=`) || !strings.Contains(body, `error=\\"invalid_token\\"`) {
+	if !strings.Contains(body, `resource_metadata=`) || !strings.Contains(body, `error=\"invalid_token\"`) {
 		t.Fatalf("tool auth challenge missing required OAuth fields: %s", body)
 	}
 }
