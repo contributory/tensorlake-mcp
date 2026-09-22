@@ -109,7 +109,7 @@ func TestBearerTakesPrecedenceOverQueryParam(t *testing.T) {
 func TestOAuthMetadataAdvertisesChatGPTRequirements(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "https://mcp.example.test/.well-known/oauth-authorization-server", nil)
 	w := httptest.NewRecorder()
-	OAuthAuthorizationServer(w, req)
+	writeAuthorizationServerMetadata(w, req)
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d", w.Code)
