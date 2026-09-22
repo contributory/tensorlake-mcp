@@ -142,9 +142,12 @@ func (s *server) runCommand(ctx context.Context, command string, timeoutSec int,
 		command = `cd "$HOME" && ` + command
 	}
 
-	// Retry process start — the sandbox container may still be initializing.
+	// Starting a process is also Tensorlake's wake-up trigger for a suspended
+	// sandbox. Do not inspect or manage sandbox lifecycle state here; keep
+	// retrying process creation until Tensorlake accepts it or the command
+	// timeout expires.
 	var proc *tensorlake.ProcessInfo
-	for range 5 {
+	for {
 		req := &tensorlake.StartProcessRequest{
 			Command:    "/bin/sh",
 			Args:       []string{"-c", command},
@@ -158,10 +161,12 @@ func (s *server) runCommand(ctx context.Context, command string, timeoutSec int,
 		if err == nil {
 			break
 		}
-		time.Sleep(500 * time.Millisecond)
-	}
-	if err != nil {
-		return -1, "", "", fmt.Errorf("failed to start process: %w", err)
+
+		select {
+		case <-ctx.Done():
+			return -1, "", "", fmt.Errorf("failed to start process before timeout: %w", err)
+		case <-time.After(500 * time.Millisecond):
+		}
 	}
 
 	// Poll until process exits, sending progress notifications if provided.

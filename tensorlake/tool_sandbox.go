@@ -100,10 +100,6 @@ func (s *server) SetSandbox(ctx context.Context, _ *mcp.CallToolRequest, in *Set
 	if err != nil {
 		return newToolResultError(fmt.Errorf("failed to get sandbox %q: %w", sandboxID, err))
 	}
-	if info.Status != tensorlake.SandboxStatusRunning {
-		return newToolResultError(fmt.Errorf("sandbox %q is %s; the primary MCP sandbox must be running", sandboxID, info.Status))
-	}
-
 	if _, err := setPrimarySandboxID(ctx, s.apiKey, sandboxID); err != nil {
 		return newToolResultError(fmt.Errorf("failed to persist primary sandbox: %w", err))
 	}

@@ -46,7 +46,7 @@ The service never creates a Tensorlake sandbox automatically and no longer uses 
 The primary sandbox is stored per Tensorlake account in Encore PostgreSQL. Two MCP tools manage it:
 
 - `list_sandboxes` — lists available Tensorlake sandboxes and marks the current primary sandbox.
-- `set_sandbox` — validates an existing running sandbox and persists it as the primary sandbox.
+- `set_sandbox` — validates that the sandbox exists and persists it as the primary sandbox regardless of its current Tensorlake lifecycle status.
 
 These are administrative/configuration tools. Their MCP descriptions explicitly instruct the model **not** to call them routinely, before normal operations, or once per session. They should only be used when the user asks to inspect/switch sandboxes, when no primary sandbox exists, or when the current primary sandbox must be replaced.
 

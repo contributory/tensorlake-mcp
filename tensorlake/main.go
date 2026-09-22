@@ -128,7 +128,7 @@ func newMCPServer(apiKey string) (*mcp.Server, *server) {
 		Description: "Administrative configuration tool that persists the primary Tensorlake sandbox used by all normal MCP tools. " +
 			"DO NOT call this routinely or once per session. Only call when the user explicitly requests a switch, " +
 			"when no primary sandbox is configured, or when the saved primary sandbox must be replaced. " +
-			"The selected sandbox must already exist and be running.",
+			"The selected sandbox only needs to exist. Its lifecycle status is managed by Tensorlake and does not prevent selecting it as primary.",
 		Annotations: &mcp.ToolAnnotations{
 			DestructiveHint: boolPtr(false),
 			IdempotentHint:  true,
