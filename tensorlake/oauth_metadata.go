@@ -15,6 +15,8 @@ import (
 	"net/url"
 	"strings"
 	"time"
+
+	encore "encore.dev"
 )
 
 const (
@@ -55,7 +57,32 @@ func tokenHash(token string) []byte {
 	return sum[:]
 }
 
+func encoreAPIOrigin() (origin string) {
+	defer func() {
+		if recover() != nil {
+			origin = ""
+		}
+	}()
+	meta := encore.Meta()
+	if meta == nil || meta.APIBaseURL.Scheme == "" || meta.APIBaseURL.Host == "" {
+		return ""
+	}
+	return strings.TrimRight(meta.APIBaseURL.String(), "/")
+}
+
 func requestOrigin(req *http.Request) string {
+	// Absolute request URLs are primarily useful in tests and direct HTTP clients.
+	if req.URL != nil && req.URL.IsAbs() && req.URL.Scheme != "" && req.URL.Host != "" {
+		return req.URL.Scheme + "://" + req.URL.Host
+	}
+
+	// In Encore Cloud the raw handler may see the underlying Cloud Run host.
+	// Encore's runtime metadata is the authoritative public API base URL and
+	// also respects environment custom domains.
+	if origin := encoreAPIOrigin(); origin != "" {
+		return origin
+	}
+
 	scheme := "https"
 	if forwarded := strings.TrimSpace(strings.Split(req.Header.Get("X-Forwarded-Proto"), ",")[0]); forwarded == "http" || forwarded == "https" {
 		scheme = forwarded
